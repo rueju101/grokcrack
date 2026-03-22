@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemma 3 AI Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        .glass { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+        #chat-box::-webkit-scrollbar { width: 6px; }
+        #chat-box::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        pre { background: #1a202c; color: #f7fafc; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.5rem 0; }
+        code { font-family: 'Courier New', Courier, monospace; }
+    </style>
+</head>
+<body class="bg-slate-100 h-screen flex flex-col">
+
+    <header class="p-4 bg-white border-b shadow-sm flex justify-between items-center">
+        <h1 class="text-xl font-bold text-slate-800">Gemma 3 <span class="text-blue-500">27B</span></h1>
+        <div class="text-xs text-slate-500 px-2 py-1 bg-slate-100 rounded">OpenRouter Free Tier</div>
+    </header>
+
+    <main id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-4">
+        <div class="flex justify-start">
+            <div class="bg-white p-3 rounded-2xl shadow-sm border max-w-[80%] text-slate-700">
+                Hello! I'm Gemma 3 27B. How can I help you today?
+            </div>
+        </div>
+    </main>
+
+    <footer class="p-4 bg-white border-t">
+        <div class="max-w-4xl mx-auto flex gap-2">
+            <input type="text" id="user-input" placeholder="Ask anything..." 
+                class="flex-1 p-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400">
+            <button id="send-btn" class="bg-blue-600 text-white px-6 py-2 rounded-xl font-medium hover:bg-blue-700 transition">
+                Send
+            </button>
+        </div>
+        <p class="text-[10px] text-center text-slate-400 mt-2">Powered by OpenRouter. Responses may be logged by providers.</p>
+    </footer>
+
+    <script>
+        const API_KEY = "YOUR_API_KEY_HERE"; // ⚠️ EXPOSED KEY RISK
+        const MODEL = "google/gemma-3-27b-it:free";
+        const chatBox = document.getElementById('chat-box');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        function appendMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+            div.innerHTML = `
+                <div class="${role === 'user' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border'} p-3 rounded-2xl shadow-sm max-w-[85%]">
+                    ${role === 'user' ? text : marked.parse(text)}
+                </div>
+            `;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+            return div.querySelector('div');
+        }
+
+        async function chat() {
+            const message = userInput.value.trim();
+            if (!message) return;
+
+            userInput.value = '';
+            appendMessage('user', message);
+
+            const aiMsgDiv = appendMessage('assistant', '...');
+            let fullAIResponse = "";
+
+            try {
+                const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${API_KEY}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        model: MODEL,
+                        messages: [{ role: "user", content: message }],
+                        stream: true
+                    })
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                aiMsgDiv.innerHTML = ""; // Clear the loading dots
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n').filter(line => line.trim() !== '');
+                    
+                    for (const line of lines) {
+                        const payload = line.replace(/^data: /, '');
+                        if (payload === '[DONE]') break;
+                        
+                        try {
+                            const json = JSON.parse(payload);
+                            const content = json.choices[0]?.delta?.content || "";
+                            fullAIResponse += content;
+                            aiMsgDiv.innerHTML = marked.parse(fullAIResponse);
+                            chatBox.scrollTop = chatBox.scrollHeight;
+                        } catch (e) {
+                            // Skip non-JSON or partial chunks
+                        }
+                    }
+                }
+            } catch (error) {
+                aiMsgDiv.innerText = "Error: " + error.message;
+            }
+        }
+
+        sendBtn.addEventListener('click', chat);
+        userInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') chat(); });
+    </script>
+</body>
+</html>
